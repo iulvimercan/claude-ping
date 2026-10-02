@@ -1,0 +1,11 @@
+{
+  "name": "claude-ping",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Starts Claude Pro/Max 5-hour usage windows on a schedule from AWS Lambda",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.286"
+  }
+}

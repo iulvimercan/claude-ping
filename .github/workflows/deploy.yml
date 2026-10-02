@@ -1,0 +1,113 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - scripts/**
+      - package.json
+      - package-lock.json
+      - infra/app.yaml
+      - .github/workflows/ci.yml
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+    inputs:
+      realPing:
+        description: Also send a real ping (starts a usage window now)
+        type: boolean
+        default: false
+
+# Never run two deploys at once, and never cancel one halfway through a stack update
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    # Copies of this repo skip the deploy (instead of failing) until their owner finishes setup
+    if: vars.AWS_REGION != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC: no long-lived AWS keys stored in GitHub
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Build function
+        run: bash scripts/build.sh function
+
+      - name: Restore CLI layers built by the ci job
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/cli
+          key: cli-${{ hashFiles('package-lock.json', 'scripts/build.sh') }}
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Publish CLI layers (only if Claude Code changed)
+        id: layers
+        run: |
+          command -v zstd || sudo apt-get install -y zstd
+          echo "arns=$(bash scripts/publish-cli-layers.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy stack
+        env:
+          CFN_EXEC_ROLE_ARN: ${{ secrets.CFN_EXEC_ROLE_ARN }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          LAYER_ARNS: ${{ steps.layers.outputs.arns }}
+        run: |
+          aws cloudformation deploy \
+            --stack-name claude-ping \
+            --template-file infra/app.yaml \
+            --role-arn "$CFN_EXEC_ROLE_ARN" \
+            --parameter-overrides "CliLayerArns=$LAYER_ARNS" "AlertEmail=$ALERT_EMAIL" \
+            --no-fail-on-empty-changeset
+
+      - name: Upload function code
+        run: |
+          aws lambda update-function-code --function-name claude-ping \
+            --zip-file fileb://dist/function.zip --query CodeSha256 --output text
+          aws lambda wait function-updated-v2 --function-name claude-ping
+
+      - name: Smoke test (dry run, no Claude message)
+        run: |
+          error=$(aws lambda invoke --function-name claude-ping \
+            --cli-binary-format raw-in-base64-out --payload "$PAYLOAD" \
+            --query FunctionError --output text out.json)
+          cat out.json; echo
+          if [[ "$error" != "None" ]]; then
+            echo "::error::Lambda invocation failed ($error)"
+            exit 1
+          fi
+        env:
+          PAYLOAD: '{"dryRun":true}'
+
+      - name: Real ping
+        if: inputs.realPing
+        run: |
+          error=$(aws lambda invoke --function-name claude-ping \
+            --cli-binary-format raw-in-base64-out --payload "$PAYLOAD" \
+            --query FunctionError --output text out.json)
+          cat out.json; echo
+          if [[ "$error" != "None" ]]; then
+            echo "::error::Lambda invocation failed ($error)"
+            exit 1
+          fi
+        env:
+          PAYLOAD: "{}"

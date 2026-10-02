@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  claude-ping app stack (deployed by GitHub Actions). Owns the function's configuration,
+  schedules and alerts. The function code itself is uploaded by CI with update-function-code.
+
+Parameters:
+  BootstrapStackName:
+    Type: String
+    Default: claude-ping-bootstrap
+  CliLayerArns:
+    Type: CommaDelimitedList
+    Description: Claude Code CLI layer version ARNs, in part order (published by CI)
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Gets an email when a ping fails (e.g. the OAuth token expired). Empty = no subscription.
+
+# Edit these to change the schedule or model, then merge to main.
+# (They're mappings, not parameters: `cloudformation deploy` would keep a parameter's
+# previous value on update and silently ignore an edited default.)
+Mappings:
+  Ping:
+    Settings:
+      Model: sonnet                      # with --effort low, keeps each ping small
+      Timezone: Europe/Istanbul
+      State: ENABLED                     # DISABLED pauses all pings
+      # Keep pings ~5h05m apart: a ping exactly 5h later can land inside the old window
+      Cron1: cron(0 5 ? * MON-FRI *)
+      Cron2: cron(5 10 ? * MON-FRI *)
+      Cron3: cron(10 15 ? * MON-FRI *)
+      Cron4: cron(15 20 ? * MON-FRI *)
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: /aws/lambda/claude-ping
+      RetentionInDays: 14
+
+  Function:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroup
+    Properties:
+      FunctionName: claude-ping
+      Description: Sends a one-word prompt to Claude Code to start a new 5-hour usage window
+      Runtime: nodejs24.x
+      Architectures: [x86_64]
+      Handler: index.handler
+      MemorySize: 1024
+      Timeout: 120
+      Role: !ImportValue
+        Fn::Sub: ${BootstrapStackName}-LambdaExecRoleArn
+      Layers: !Ref CliLayerArns
+      Environment:
+        Variables:
+          PING_MODEL: !FindInMap [Ping, Settings, Model]
+          TOKEN_PARAM: !ImportValue
+            Fn::Sub: ${BootstrapStackName}-TokenParameterName
+      # Placeholder only: CI replaces it right after the stack deploy. Never edit this,
+      # a change here would make CloudFormation overwrite the real code.
+      Code:
+        ZipFile: |
+          exports.handler = async () => { throw new Error("placeholder code, run the deploy workflow"); };
+
+  # Async invokes (from Scheduler): one retry, and drop pings that are too late to matter
+  EventInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref Function
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 1
+      MaximumEventAgeInSeconds: 600
+
+  ScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: claude-ping
+
+  Ping1:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: ping-1
+      GroupName: !Ref ScheduleGroup
+      ScheduleExpression: !FindInMap [Ping, Settings, Cron1]
+      ScheduleExpressionTimezone: !FindInMap [Ping, Settings, Timezone]
+      State: !FindInMap [Ping, Settings, State]
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Function.Arn
+        RoleArn: !ImportValue
+          Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
+        Input: "{}"
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 600
+
+  Ping2:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: ping-2
+      GroupName: !Ref ScheduleGroup
+      ScheduleExpression: !FindInMap [Ping, Settings, Cron2]
+      ScheduleExpressionTimezone: !FindInMap [Ping, Settings, Timezone]
+      State: !FindInMap [Ping, Settings, State]
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Function.Arn
+        RoleArn: !ImportValue
+          Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
+        Input: "{}"
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 600
+
+  Ping3:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: ping-3
+      GroupName: !Ref ScheduleGroup
+      ScheduleExpression: !FindInMap [Ping, Settings, Cron3]
+      ScheduleExpressionTimezone: !FindInMap [Ping, Settings, Timezone]
+      State: !FindInMap [Ping, Settings, State]
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Function.Arn
+        RoleArn: !ImportValue
+          Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
+        Input: "{}"
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 600
+
+  Ping4:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: ping-4
+      GroupName: !Ref ScheduleGroup
+      ScheduleExpression: !FindInMap [Ping, Settings, Cron4]
+      ScheduleExpressionTimezone: !FindInMap [Ping, Settings, Timezone]
+      State: !FindInMap [Ping, Settings, State]
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Function.Arn
+        RoleArn: !ImportValue
+          Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
+        Input: "{}"
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 600
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: claude-ping-alerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: claude-ping-errors
+      AlarmDescription: >-
+        A ping failed. Check the /aws/lambda/claude-ping logs. Auth errors mean the OAuth token
+        expired: run `claude setup-token` and update the SSM parameter.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref Function
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt Function.Arn
+  AlertTopicArn:
+    Value: !Ref AlertTopic
