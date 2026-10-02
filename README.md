@@ -108,8 +108,14 @@ The commands use `eu-north-1`. Use any region, but use the same one everywhere.
 claude setup-token
 ```
 
+Copy the token it prints. The next command waits for you to paste it and press Enter. Nothing is shown, and the token stays out of your shell history:
+
 ```bash
-aws ssm put-parameter --region eu-north-1 --name /claude-ping/oauth-token --type SecureString --value "<token>"
+read -rs CLAUDE_TOKEN
+```
+
+```bash
+aws ssm put-parameter --region eu-north-1 --name /claude-ping/oauth-token --type SecureString --value "$CLAUDE_TOKEN" && unset CLAUDE_TOKEN
 ```
 
 The token grants full access to your subscription. Treat it like a password and never commit it. 🔐
@@ -194,7 +200,7 @@ Finally, start the first deploy from **Actions → deploy → Run workflow**.
 | 🤖 Use another model | Change `Model` there, then check `/usage` after the next ping to confirm it still starts a window |
 | ✏️ Change the handler | Edit [src/index.mjs](src/index.mjs), open a PR and merge |
 | ⬆️ Update Claude Code | Merge Dependabot's weekly PR. CI rebuilds and re-checks the layers |
-| 🔑 Rotate the token | `claude setup-token`, then the step 1 command with `--overwrite`. No redeploy needed |
+| 🔑 Rotate the token | `claude setup-token`, then the step 1 commands with `--overwrite` added to `put-parameter`. No redeploy needed |
 | ⏪ Roll back | `git revert` the bad commit and push |
 | 🚀 Redeploy manually | **Actions → deploy → Run workflow** |
 
@@ -244,6 +250,8 @@ Extra pings during an active window are harmless.
 - GitHub assumes an AWS role over OIDC, so no long-lived AWS keys exist. Only jobs in this repo's `production` environment can assume it, and forks can't.
 - The deploy role can only change the `claude-ping` stack, function and layers. CloudFormation runs as a separate role scoped to those resources, and no role can create IAM resources.
 - Pull requests from forks only run `ci.yml`, which has no secrets and no AWS access. Nothing uses `pull_request_target`.
+- Workflow logs are public. The deploy job masks the AWS account ID, and secrets show as `***`.
+- The deploy job builds the CLI layers itself instead of reusing the `ci` job's cache, so nothing that runs during CI can alter the binary that receives the token.
 - Third-party actions are pinned to commit SHAs, and Dependabot keeps them current.
 - ⚠️ Read every pull request before merging, especially changes to `.github/`, `scripts/` and `infra/`. Once on `main`, code runs with the deploy role.
 
