@@ -51,7 +51,10 @@ Resources:
                 - CreateOidc
                 - !Ref GitHubOidcProvider
                 - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
-            Action: sts:AssumeRoleWithWebIdentity
+            # configure-aws-credentials sends session tags (repo, commit, actor) for CloudTrail
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+              - sts:TagSession
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
