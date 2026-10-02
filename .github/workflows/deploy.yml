@@ -49,17 +49,14 @@ jobs:
       - name: Build function
         run: bash scripts/build.sh function
 
-      - name: Restore CLI layers built by the ci job
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: dist/cli
-          key: cli-${{ hashFiles('package-lock.json', 'scripts/build.sh') }}
-
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true # run logs are public, and later steps print ARNs
 
+      # Builds the layers here when needed instead of reusing the ci job's cache,
+      # so nothing that runs during CI can alter the binary that gets the token
       - name: Publish CLI layers (only if Claude Code changed)
         id: layers
         run: |

@@ -4,12 +4,13 @@ Description: >-
   GitHub OIDC trust plus every IAM role, so the CI role never creates IAM resources.
 
 Parameters:
-  GitHubOwner:
+  GitHubSubjectPrefix:
     Type: String
-    Description: GitHub user or org that owns the repository
-  GitHubRepo:
-    Type: String
-    Default: claude-ping
+    AllowedPattern: "^repo:[^:]+$"
+    Description: >-
+      The repo's OIDC subject prefix, exactly as GitHub reports it:
+      gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+      New repos use IDs (repo:owner@123/name@456), older ones names (repo:owner/name).
   GitHubEnvironment:
     Type: String
     Default: production
@@ -58,7 +59,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOwner}/${GitHubRepo}:environment:${GitHubEnvironment}
+                token.actions.githubusercontent.com:sub: !Sub ${GitHubSubjectPrefix}:environment:${GitHubEnvironment}
       Policies:
         - PolicyName: deploy
           PolicyDocument:
