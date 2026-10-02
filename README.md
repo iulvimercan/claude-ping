@@ -86,8 +86,7 @@ claude-ping/
 Each copy runs in **its own** AWS account with **its own** Claude token. Your copy can't touch anyone else's deployment, and theirs can't touch yours.
 
 1. Click **Use this template** (or **Fork**) at the top of this page. A template copy is cleaner: it's independent, and Dependabot works normally there.
-2. Clone your copy and follow [One-time setup](#setup) below. Skip the `git init` and `gh repo create` commands in step 3, since your repo already exists.
-   - In step 2, use **your** GitHub username for `GitHubOwner`. If you renamed the repo, also add `GitHubRepo=<your-repo-name>`.
+2. Clone your copy and follow [One-time setup](#setup) below. Skip step 2, since your repo already exists.
 3. Set your timezone and ping times under `Mappings → Ping → Settings` in [infra/app.yaml](infra/app.yaml).
 4. Push that change, or run **Actions → deploy → Run workflow**.
 
@@ -115,33 +114,43 @@ aws ssm put-parameter --region eu-north-1 --name /claude-ping/oauth-token --type
 
 The token grants full access to your subscription. Treat it like a password and never commit it. 🔐
 
-### 2. 🏗️ Deploy the bootstrap stack (IAM + GitHub OIDC)
-
-Check first whether your account already trusts GitHub Actions. If this prints a provider, add `CreateOidcProvider=false` to the next command:
-
-```bash
-aws iam list-open-id-connect-providers
-```
-
-```bash
-aws cloudformation deploy --region eu-north-1 --stack-name claude-ping-bootstrap --template-file infra/bootstrap.yaml --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubOwner=<your-github-username>
-```
-
-```bash
-aws cloudformation describe-stacks --region eu-north-1 --stack-name claude-ping-bootstrap --query "Stacks[0].Outputs" --output table
-```
-
-### 3. 🐙 Create the GitHub repo and its settings
+### 2. 🐙 Create the GitHub repo
 
 ```bash
 git init -b main && git add . && git commit -m "Initial commit"
 ```
 
 ```bash
-gh repo create claude-ping --public --source .
+gh repo create claude-ping --public --source . --push
 ```
 
-Use the values from step 2's outputs. Until `AWS_REGION` is set, pushes only run the checks and the deploy job is skipped:
+Pushing now is safe: until step 4 sets `AWS_REGION`, only the checks run and the deploy job is skipped.
+
+### 3. 🏗️ Deploy the bootstrap stack (IAM + GitHub OIDC)
+
+The deploy role trusts exactly one repo, identified by its OIDC subject prefix. New repos use IDs (`repo:you@123/claude-ping@456`), older ones use names (`repo:you/claude-ping`), so read yours from GitHub:
+
+```bash
+gh api repos/<your-github-username>/claude-ping/actions/oidc/customization/sub --jq .sub_claim_prefix
+```
+
+Check whether your account already trusts GitHub Actions. If this prints a provider, add `CreateOidcProvider=false` to the deploy command:
+
+```bash
+aws iam list-open-id-connect-providers
+```
+
+```bash
+aws cloudformation deploy --region eu-north-1 --stack-name claude-ping-bootstrap --template-file infra/bootstrap.yaml --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubSubjectPrefix=<prefix-from-above>
+```
+
+```bash
+aws cloudformation describe-stacks --region eu-north-1 --stack-name claude-ping-bootstrap --query "Stacks[0].Outputs" --output table
+```
+
+### 4. 🔗 Connect GitHub to AWS
+
+Use the values from step 3's outputs:
 
 ```bash
 gh secret set AWS_DEPLOY_ROLE_ARN --body "<GitHubDeployRoleArn>"
@@ -159,17 +168,15 @@ gh secret set ALERT_EMAIL --body "<you@example.com>"
 gh variable set AWS_REGION --body eu-north-1
 ```
 
-```bash
-git push -u origin main
-```
-
 Then, in **Settings** on GitHub:
 - **Environments → production:** limit deployment branches to `main`. A required reviewer is optional.
 - **Branches:** protect `main` and require the `ci` check.
 - **Actions → General → Fork pull request workflows:** require approval for **all outside collaborators**.
 - **Code security:** turn on secret scanning and push protection.
 
-### 4. ✅ Verify
+Finally, start the first deploy from **Actions → deploy → Run workflow**.
+
+### 5. ✅ Verify
 
 1. **Actions → deploy** should finish green. Its smoke test is a dry run that starts the CLI and reads the token without messaging Claude.
 2. Confirm the SNS subscription email AWS sent you.
@@ -208,7 +215,7 @@ Extra pings during an active window are harmless.
 | Symptom | Likely cause / fix |
 |---|---|
 | 📧 Alarm email | Check `/aws/lambda/claude-ping` in CloudWatch Logs. Auth errors mean the token expired, so rotate it |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | `GitHubOwner` or the repo name in the bootstrap stack doesn't match, or the job isn't running in the `production` environment |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | `GitHubSubjectPrefix` doesn't match the repo's `sub_claim_prefix` (re-run the step 3 `gh api` command), or the job isn't running in the `production` environment |
 | `ParameterNotFound` | Step 1 used a different region or name than the stack |
 | Stack fails on `LogGroup` "already exists" | A `/aws/lambda/claude-ping` log group already exists in the account. Delete it and re-run |
 | `layer-N.zip exceeds the 50 MB` in CI | Claude Code grew. Lower `PART_SIZE` in `build.sh` and bump `RECIPE` |
