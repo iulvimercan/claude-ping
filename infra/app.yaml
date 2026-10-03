@@ -25,10 +25,11 @@ Mappings:
       Timezone: Europe/Istanbul
       State: ENABLED                     # DISABLED pauses all pings
       # Keep pings ~5h05m apart: a ping exactly 5h later can land inside the old window
-      Cron1: cron(0 5 ? * MON-FRI *)
-      Cron2: cron(5 10 ? * MON-FRI *)
-      Cron3: cron(10 15 ? * MON-FRI *)
-      Cron4: cron(15 20 ? * MON-FRI *)
+      # Runs every day; put MON-FRI in the day-of-week field for weekdays only
+      Cron1: cron(0 5 ? * * *)
+      Cron2: cron(5 10 ? * * *)
+      Cron3: cron(10 15 ? * * *)
+      Cron4: cron(15 20 ? * * *)
 
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
@@ -94,7 +95,7 @@ Resources:
         Arn: !GetAtt Function.Arn
         RoleArn: !ImportValue
           Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
-        Input: "{}"
+        Input: '{"trigger":"ping-1","scheduledTime":"<aws.scheduler.scheduled-time>","attempt":"<aws.scheduler.attempt-number>"}'
         RetryPolicy:
           MaximumRetryAttempts: 2
           MaximumEventAgeInSeconds: 600
@@ -112,7 +113,7 @@ Resources:
         Arn: !GetAtt Function.Arn
         RoleArn: !ImportValue
           Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
-        Input: "{}"
+        Input: '{"trigger":"ping-2","scheduledTime":"<aws.scheduler.scheduled-time>","attempt":"<aws.scheduler.attempt-number>"}'
         RetryPolicy:
           MaximumRetryAttempts: 2
           MaximumEventAgeInSeconds: 600
@@ -130,7 +131,7 @@ Resources:
         Arn: !GetAtt Function.Arn
         RoleArn: !ImportValue
           Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
-        Input: "{}"
+        Input: '{"trigger":"ping-3","scheduledTime":"<aws.scheduler.scheduled-time>","attempt":"<aws.scheduler.attempt-number>"}'
         RetryPolicy:
           MaximumRetryAttempts: 2
           MaximumEventAgeInSeconds: 600
@@ -148,7 +149,7 @@ Resources:
         Arn: !GetAtt Function.Arn
         RoleArn: !ImportValue
           Fn::Sub: ${BootstrapStackName}-SchedulerRoleArn
-        Input: "{}"
+        Input: '{"trigger":"ping-4","scheduledTime":"<aws.scheduler.scheduled-time>","attempt":"<aws.scheduler.attempt-number>"}'
         RetryPolicy:
           MaximumRetryAttempts: 2
           MaximumEventAgeInSeconds: 600

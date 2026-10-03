@@ -64,15 +64,15 @@ function cliEnv(token) {
   };
 }
 
-async function dryRun() {
+async function dryRun(trigger) {
   const token = await readToken();
   const { stdout } = await run(CLI_PATH, ["--version"], { env: cliEnv(token), timeout: 30_000 });
   const version = stdout.trim();
-  log({ ok: true, dryRun: true, version });
+  log({ ok: true, dryRun: true, ...trigger, version });
   return { ok: true, dryRun: true, version };
 }
 
-async function ping() {
+async function ping(trigger) {
   const token = await readToken();
   const started = Date.now();
   const args = ["-p", PING_PROMPT, "--model", PING_MODEL, "--effort", "low", "--max-turns", "1", "--output-format", "json"];
@@ -81,12 +81,12 @@ async function ping() {
   try {
     ({ stdout } = await run(CLI_PATH, args, { env: cliEnv(token), timeout: 100_000 }));
   } catch (err) {
-    log({ ok: false, model: PING_MODEL, durationMs: Date.now() - started, exitCode: err.code, stderr: err.stderr?.slice(0, 2000) });
+    log({ ok: false, ...trigger, model: PING_MODEL, durationMs: Date.now() - started, exitCode: err.code, stderr: err.stderr?.slice(0, 2000) });
     throw new Error(`claude exited with ${err.code}`);
   }
 
   const result = JSON.parse(stdout);
-  const fields = { model: PING_MODEL, durationMs: Date.now() - started, sessionId: result.session_id };
+  const fields = { ...trigger, model: PING_MODEL, durationMs: Date.now() - started, sessionId: result.session_id };
   if (result.is_error) {
     log({ ok: false, ...fields, subtype: result.subtype, result: String(result.result).slice(0, 500) });
     // e.g. "Not logged in · Please run /login" when the OAuth token expired
@@ -97,7 +97,9 @@ async function ping() {
 }
 
 export const handler = async (event = {}) => {
+  // Schedules send these (infra/app.yaml); the console Test and the deploy workflow send none
+  const trigger = { trigger: event.trigger ?? "manual", scheduledTime: event.scheduledTime, attempt: event.attempt };
   await ensureCli();
   await prepareHome();
-  return event.dryRun ? dryRun() : ping();
+  return event.dryRun ? dryRun(trigger) : ping(trigger);
 };
