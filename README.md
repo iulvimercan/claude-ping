@@ -225,19 +225,20 @@ Extra pings during an active window are harmless.
 | `ParameterNotFound` | Step 1 used a different region or name than the stack |
 | Stack fails on `LogGroup` "already exists" | A `/aws/lambda/claude-ping` log group already exists in the account. Delete it and re-run |
 | `layer-N.zip exceeds the 50 MB` in CI | Claude Code grew. Lower `PART_SIZE` in `build.sh` and bump `RECIPE` |
-| Ping ran but no new window | The ping landed inside the old window. Add more buffer to the schedule |
+| Ping ran but no new window | The ping landed inside the old window. A console **Test** or a **realPing** deploy also starts one and can swallow the next scheduled ping. Add more buffer, and avoid real pings between scheduled times |
+| Not sure a schedule fired | Search `/aws/lambda/claude-ping` for `"trigger":"ping-`. Scheduled pings log their schedule and `scheduledTime`, manual runs log `"trigger":"manual"` |
 
 ---
 
 ## 💰 Cost: $0
 
-| Service | Usage (~88 pings/month) | Always-free allowance |
+| Service | Usage (~120 pings/month) | Always-free allowance |
 |---|---|---|
-| Lambda | ~88 requests, ~1,300 GB-s | 1M requests + 400,000 GB-s |
+| Lambda | ~120 requests, ~1,800 GB-s | 1M requests + 400,000 GB-s |
 | Lambda code + layers storage | ~170 MB | 75 GB |
-| EventBridge Scheduler | ~88 invocations | 14M/month |
+| EventBridge Scheduler | ~120 invocations | 14M/month |
 | SSM Parameter Store | 1 standard SecureString | free (standard tier) |
-| KMS (`aws/ssm` managed key) | ~90 requests | 20,000/month |
+| KMS (`aws/ssm` managed key) | ~120 requests | 20,000/month |
 | CloudWatch Logs / alarms | a few KB / 1 alarm | 5 GB / 10 alarms |
 | SNS email | 0–5 | 1,000/month |
 | GitHub Actions | public repo | free |
