@@ -6,6 +6,6 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.286"
+    "@anthropic-ai/claude-code": "2.1.291"
   }
 }
